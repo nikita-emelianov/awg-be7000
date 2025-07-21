@@ -13,9 +13,6 @@ Firmware Version used: `1.1.16`. This forwards all traffic from the guest networ
 Host 192.168.31.1
 HostKeyAlgorithms +ssh-rsa
 PubkeyAcceptedAlgorithms +ssh-rsa
-StrictHostKeyChecking no
-UserKnownHostsFile /dev/null
-LogLevel ERROR
 ```
 
 * Connect: `ssh root@192.168.31.1`
