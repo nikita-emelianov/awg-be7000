@@ -53,11 +53,12 @@ fi
 echo "Ensuring a clean state for awg0 interface and amneziawg-go daemon..."
 
 # 1. Stop any running amneziawg-go processes
-PID=$(ps | grep '[a]mneziawg-go' | awk '{print $1}')
+# Use 'ps' compatible with BusyBox
+PID=$(ps | grep amneziawg-go | grep -v grep | awk '{print $1}')
 if [ -n "$PID" ]; then
     echo "Found existing amneziawg-go process (PID: $PID). Killing it..."
     kill "$PID" 2>/dev/null
-    sleep 1
+    sleep 1 # Give it a moment to terminate
 fi
 
 # 2. Delete the awg0 interface if it exists
@@ -65,20 +66,20 @@ if ip link show awg0 > /dev/null 2>&1; then
     echo "Existing awg0 interface found. Bringing it down and deleting it..."
     ip link set dev awg0 down 2>/dev/null
     ip link del dev awg0 2>/dev/null
-    sleep 1
+    sleep 1 # Give it a moment to be removed
 fi
 
-# 3. Start the amneziawg-go daemon in the background
+# 3. Start the amneziawg-go daemon in the background to create the TUN device
 echo "Starting amneziawg-go daemon in the background..."
-/data/usr/app/awg/amneziawg-go awg0 &
-sleep 2
+/data/usr/app/awg/amneziawg-go awg0 & # Run in background
+sleep 2 # Give the daemon a moment to create the interface
 
-# 4. Verify awg0 is now present
+# 4. Verify awg0 is now present before proceeding
 if ! ip link show awg0 > /dev/null 2>&1; then
-    echo "Error: awg0 interface was not created. Aborting setup."
+    echo "Error: awg0 interface was not created by amneziawg-go daemon. Aborting setup."
     exit 1
 fi
-echo "awg0 interface successfully created."
+echo "awg0 interface successfully created by amneziawg-go daemon."
 
 # 5. Apply the configuration using the 'awg' utility and assign IP
 echo "Applying AmneziaWG configuration and IP address."
@@ -89,13 +90,30 @@ ip l set up awg0
 # --- END INTERFACE SETUP AND DAEMON MANAGEMENT SECTION ---
 
 # Delete existing route for guest network
-ip route del 192.168.33.0/24 dev br-guest 2>/dev/null
+ip route del 192.168.33.0/24 dev br-guest 2>/dev/null # Added 2>/dev/null for robustness
 
 # Add new guest network routes
 ip route add 192.168.33.0/24 dev br-guest table main
 ip route add default dev awg0 table 200
 ip rule add from 192.168.33.0/24 to 192.168.33.1 dport 53 table main pref 100
 ip rule add from 192.168.33.0/24 table 200 pref 200
+
+# Set up firewall for DNS requests
+iptables -A FORWARD -i br-guest -d 192.168.33.1 -p tcp --dport 53 -j ACCEPT
+iptables -A FORWARD -i br-guest -d 192.168.33.1 -p udp --dport 53 -j ACCEPT
+iptables -A FORWARD -i br-guest -s 192.168.33.1 -p tcp --sport 53 -j ACCEPT
+iptables -A FORWARD -i br-guest -s 192.168.33.1 -p udp --sport 53 -j ACCEPT
+
+# Common rules for traffic
+iptables -A FORWARD -i br-guest -o awg0 -j ACCEPT
+iptables -A FORWARD -i awg0 -o br-guest -j ACCEPT
+
+# Set up NAT for DNS requests from guest network
+iptables -t nat -A PREROUTING -p udp -s 192.168.33.0/24 --dport 53 -j DNAT --to-destination "${dns}:53"
+iptables -t nat -A PREROUTING -p tcp -s 192.168.33.0/24 --dport 53 -j DNAT --to-destination "${dns}:53"
+
+# Set up NAT
+iptables -t nat -A POSTROUTING -s 192.168.33.0/24 -o awg0 -j MASQUERADE
 
 # Set up firewall AmneziaWG zone
 uci set firewall.awg=zone
@@ -104,8 +122,6 @@ uci set firewall.awg.network='awg0'
 uci set firewall.awg.input='ACCEPT'
 uci set firewall.awg.output='ACCEPT'
 uci set firewall.awg.forward='ACCEPT'
-uci set firewall.awg.masq='1'
-
 if ! uci show firewall | grep -qE "src='awg'|dest='awg'"; then
     uci add firewall forwarding
     uci set firewall.@forwarding[-1].src='guest'
