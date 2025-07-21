@@ -111,8 +111,7 @@ uci set firewall.awg.forward='ACCEPT'
 # Add masquerading for the awg zone if it's acting as an egress to the internet
 uci set firewall.awg.masq='1' # Explicitly enable masquerading for the awg zone
 
-# Corrected syntax for 'if ! command | command'
-if ! (uci show firewall | grep -qE "src='awg'|dest='awg'"); then
+if ! uci show firewall | grep -qE "src='awg'|dest='awg'"; then
     uci add firewall forwarding
     uci set firewall.@forwarding[-1].src='guest'
     uci set firewall.@forwarding[-1].dest='awg'
@@ -124,9 +123,8 @@ uci commit firewall
 
 # Clear routes cache and restart firewall
 echo "Restarting firewall..."
-# Filter out the specific error messages from qca-nss-ecm
 ip route flush cache
-/etc/init.d/firewall reload 2>&1 | grep -v -E 'Running script \'/etc/firewall.d/qca-nss-ecm\'|! Failed with exit code 1'
+/etc/init.d/firewall reload
 
 # Turn IP-forwarding on
 echo 1 > /proc/sys/net/ipv4/ip_forward # Corrected: 'ip_forwar' changed to 'ip_forward'
