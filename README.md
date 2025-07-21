@@ -29,7 +29,7 @@ scp -O /path/to/amnezia_for_awg.conf root@192.168.31.1:/data/usr/app/awg/
 4.  On the router, execute the following commands:
 
 ```bash
-curl -L -o awg_setup.sh https://raw.githubusercontent.com/nikita-emelianov/awg-be7000/main/awg_setup.sh
+curl -L -o awg_setup.sh https://github.com/nikita-emelianov/awg-be7000/raw/main/awg_setup.sh
 chmod +x awg_setup.sh
 ./awg_setup.sh
 ```
