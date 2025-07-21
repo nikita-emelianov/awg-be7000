@@ -1,238 +1,172 @@
 #!/bin/sh
 
-# Automates the setup and configuration of AWG for a guest network. The script is idempotent and can be re-run safely.
-
-set -e
-
-# --- Configuration and Constants ---
-# All user-configurable variables are placed here for easy access.
+# Change to the script's own directory to ensure all relative paths work correctly.
+# This is critical for running the script via cron.
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
-MAIN_CONFIG_FILE="amnezia_for_awg.conf"
-INTERFACE_CONFIG_FILE="awg0.conf"
+cd "$SCRIPT_DIR" || exit 1
 
-# Network Settings
-GUEST_NETWORK="192.168.33.0/24"
-GUEST_BRIDGE="br-guest"
-GUEST_ROUTER_IP="192.168.33.1"
-VPN_INTERFACE="awg0"
-VPN_ROUTING_TABLE="200"
+# Define configuration file paths
+config_file="amnezia_for_awg.conf"
+interface_config="awg0.conf"
 
-# URLs for Dependencies
-AWG_ARCHIVE_URL="https://github.com/nikita-emelianov/awg-be7000/raw/main/awg.tar.gz"
-CLEAR_FW_SCRIPT_URL="https://github.com/nikita-emelianov/awg-be7000/raw/main/awg_clear_firewall_settings.sh"
-WATCHDOG_SCRIPT_URL="https://github.com/nikita-emelianov/awg-be7000/raw/main/awg_watchdog.sh"
-
-# --- Utility Functions ---
-
-log() {
-    echo "INFO: $1"
-}
-
-die() {
-    echo "ERROR: $1" >&2
+# Check if the main configuration file exists
+if [ ! -f "$config_file" ]; then
+    echo "Error: Configuration file '$config_file' not found."
     exit 1
-}
+fi
 
-# Download a file from a URL if it doesn't already exist.
-# Arguments: $1: URL, $2: Destination file path
-download_if_missing() {
-    local url="$1"
-    local dest_file="$2"
-    if [ ! -f "$dest_file" ]; then
-        log "Downloading '$dest_file'..."
-        if ! curl -fsSL -o "$dest_file" "$url"; then
-            die "Failed to download from $url"
-        fi
-        log "'$dest_file' downloaded successfully."
-    else
-        log "'$dest_file' already exists."
-    fi
-}
+# Extract client address and DNS from the configuration file
+address=$(awk -F' = ' '/^Address/ {print $2}' "$config_file")
+dns=$(awk -F' = ' '/^DNS/ {print $2}' "$config_file")
+# Take only the first DNS server if multiple are listed
+dns=$(echo "$dns" | cut -d',' -f1)
 
-# --- Core Logic ---
+echo "AmneziaWG client address: $address"
+echo "DNS: $dns"
 
-check_root() {
-    if [ "$(id -u)" -ne 0 ]; then
-        die "This script must be run as root."
-    fi
-}
+# Create awg0.conf if it doesn't exist, excluding Address and DNS lines
+if [ -f "$interface_config" ]; then
+    echo "$interface_config already exists."
+else
+    awk '!/^Address/ && !/^DNS/' "$config_file" > "$interface_config"
+    echo "$interface_config created."
+fi
 
-setup_dependencies() {
-    log "Checking for dependencies..."
+# --- DEPENDENCY DOWNLOAD ---
+if [ ! -f "awg" ] || [ ! -f "amneziawg-go" ]; then
+    echo "AmneziaWG binaries not found. Downloading..."
+    curl -L -o awg.tar.gz https://github.com/nikita-emelianov/awg-be7000/raw/main/awg.tar.gz
+    tar -xzvf awg.tar.gz
+    chmod +x amneziawg-go awg
+    rm awg.tar.gz
+    echo "Archive downloaded and unpacked."
+else
+    echo "AmneziaWG binaries exist, proceeding."
+fi
 
-    if [ ! -f "awg" ] || [ ! -f "amneziawg-go" ]; then
-        log "AmneziaWG binaries not found."
-        download_if_missing "$AWG_ARCHIVE_URL" "awg.tar.gz"
-        if ! tar -xzvf awg.tar.gz; then
-            die "Failed to extract awg.tar.gz"
-        fi
-        chmod +x amneziawg-go awg
-        rm awg.tar.gz
-        log "Binaries unpacked and made executable."
-    else
-        log "AmneziaWG binaries already exist."
-    fi
+# --- HELPER SCRIPT DOWNLOADS (SEPARATED) ---
+# Download awg_clear_firewall_settings.sh if it doesn't exist
+if [ ! -f "awg_clear_firewall_settings.sh" ]; then
+    echo "Helper script 'awg_clear_firewall_settings.sh' not found. Downloading..."
+    curl -L -o awg_clear_firewall_settings.sh https://github.com/nikita-emelianov/awg-be7000/raw/main/awg_clear_firewall_settings.sh
+    chmod +x awg_clear_firewall_settings.sh
+    echo "Script downloaded and made executable."
+else
+    echo "Helper script 'awg_clear_firewall_settings.sh' exists."
+fi
 
-    download_if_missing "$CLEAR_FW_SCRIPT_URL" "awg_clear_firewall_settings.sh"
-    chmod +x "awg_clear_firewall_settings.sh"
+# Download awg_watchdog.sh if it doesn't exist
+if [ ! -f "awg_watchdog.sh" ]; then
+    echo "Helper script 'awg_watchdog.sh' not found. Downloading..."
+    curl -L -o awg_watchdog.sh https://github.com/nikita-emelianov/awg-be7000/raw/main/awg_watchdog.sh
+    chmod +x awg_watchdog.sh
+    echo "Script downloaded and made executable."
+else
+    echo "Helper script 'awg_watchdog.sh' exists."
+fi
 
-    download_if_missing "$WATCHDOG_SCRIPT_URL" "awg_watchdog.sh"
-    chmod +x "awg_watchdog.sh"
-}
+# --- INTERFACE SETUP AND DAEMON MANAGEMENT SECTION ---
 
-create_interface_config() {
-    log "Parsing main configuration..."
-    [ -f "$MAIN_CONFIG_FILE" ] || die "Main configuration file '$MAIN_CONFIG_FILE' not found."
+echo "Ensuring a clean state for awg0 interface and amneziawg-go daemon..."
 
-    export ADDRESS
-    ADDRESS=$(awk -F' = ' '/^Address/ {print $2}' "$MAIN_CONFIG_FILE")
-    
-    export FIRST_DNS
-    DNS_SERVERS=$(awk -F' = ' '/^DNS/ {print $2}' "$MAIN_CONFIG_FILE")
-    FIRST_DNS=$(echo "$DNS_SERVERS" | cut -d',' -f1)
+# 1. Stop any running amneziawg-go processes
+# Use 'ps' compatible with BusyBox
+PID=$(ps | grep amneziawg-go | grep -v grep | awk '{print $1}')
+if [ -n "$PID" ]; then
+    echo "Found existing amneziawg-go process (PID: $PID). Killing it..."
+    kill "$PID" 2>/dev/null
+    sleep 1 # Give it a moment to terminate
+fi
 
-    [ -n "$ADDRESS" ] || die "Could not parse Address from '$MAIN_CONFIG_FILE'."
-    [ -n "$FIRST_DNS" ] || die "Could not parse DNS from '$MAIN_CONFIG_FILE'."
+# 2. Delete the awg0 interface if it exists
+if ip link show awg0 > /dev/null 2>&1; then
+    echo "Existing awg0 interface found. Bringing it down and deleting it..."
+    ip link set dev awg0 down 2>/dev/null
+    ip link del dev awg0 2>/dev/null
+    sleep 1 # Give it a moment to be removed
+fi
 
-    log "AmneziaWG client address: $ADDRESS"
-    log "Primary DNS to be used: $FIRST_DNS"
+# 3. Start the amneziawg-go daemon in the background to create the TUN device
+echo "Starting amneziawg-go daemon in the background..."
+/data/usr/app/awg/amneziawg-go awg0 & # Run in background
+sleep 2 # Give the daemon a moment to create the interface
 
-    if [ ! -f "$INTERFACE_CONFIG_FILE" ]; then
-        log "Creating '$INTERFACE_CONFIG_FILE'..."
-        awk '!/^Address/ && !/^DNS/' "$MAIN_CONFIG_FILE" > "$INTERFACE_CONFIG_FILE"
-    else
-        log "'$INTERFACE_CONFIG_FILE' already exists."
-    fi
-}
+# 4. Verify awg0 is now present before proceeding
+if ! ip link show awg0 > /dev/null 2>&1; then
+    echo "Error: awg0 interface was not created by amneziawg-go daemon. Aborting setup."
+    exit 1
+fi
+echo "awg0 interface successfully created by amneziawg-go daemon."
 
-reset_and_start_interface() {
-    log "Resetting AmneziaWG interface and daemon..."
+# 5. Apply the configuration using the 'awg' utility and assign IP
+echo "Applying AmneziaWG configuration and IP address."
+/data/usr/app/awg/awg setconf awg0 /data/usr/app/awg/awg0.conf
+ip a add "$address" dev awg0
+ip l set up awg0
 
-    # Stop any running amneziawg-go daemon. pkill is more direct.
-    if pkill -f amneziawg-go; then
-        log "Stopped existing amneziawg-go daemon."
-        sleep 1
-    fi
+# --- END INTERFACE SETUP AND DAEMON MANAGEMENT SECTION ---
 
-    # Delete the awg0 interface if it exists. Ignore errors if it doesn't.
-    if ip link show "$VPN_INTERFACE" > /dev/null 2>&1; then
-        log "Deleting existing '$VPN_INTERFACE' interface."
-        ip link set dev "$VPN_INTERFACE" down 2>/dev/null || true
-        ip link del dev "$VPN_INTERFACE" 2>/dev/null || true
-        sleep 1
-    fi
+# Delete existing route for guest network
+ip route del 192.168.33.0/24 dev br-guest 2>/dev/null # Added 2>/dev/null for robustness
 
-    log "Starting amneziawg-go daemon in the background..."
-    ./amneziawg-go "$VPN_INTERFACE" &
-    # Give the daemon time to initialize and create the interface.
-    sleep 2
+# Add new guest network routes
+ip route add 192.168.33.0/24 dev br-guest table main
+ip route add default dev awg0 table 200
+ip rule add from 192.168.33.0/24 to 192.168.33.1 dport 53 table main pref 100
+ip rule add from 192.168.33.0/24 table 200 pref 200
 
-    ip link show "$VPN_INTERFACE" > /dev/null 2>&1 || die "Daemon failed to create '$VPN_INTERFACE'."
-    log "'$VPN_INTERFACE' interface created successfully."
+# Set up firewall for DNS requests
+iptables -A FORWARD -i br-guest -d 192.168.33.1 -p tcp --dport 53 -j ACCEPT
+iptables -A FORWARD -i br-guest -d 192.168.33.1 -p udp --dport 53 -j ACCEPT
+iptables -A FORWARD -i br-guest -s 192.168.33.1 -p tcp --sport 53 -j ACCEPT
+iptables -A FORWARD -i br-guest -s 192.168.33.1 -p udp --sport 53 -j ACCEPT
 
-    log "Applying configuration to '$VPN_INTERFACE'..."
-    ./awg setconf "$VPN_INTERFACE" "$INTERFACE_CONFIG_FILE"
-    ip addr add "$ADDRESS" dev "$VPN_INTERFACE"
-    ip link set up dev "$VPN_INTERFACE"
-    log "Interface '$VPN_INTERFACE' is up and configured."
-}
+# Common rules for traffic
+iptables -A FORWARD -i br-guest -o awg0 -j ACCEPT
+iptables -A FORWARD -i awg0 -o br-guest -j ACCEPT
 
-setup_routing_and_firewall() {
-    log "Configuring routing and firewall rules..."
+# Set up NAT for DNS requests from guest network
+iptables -t nat -A PREROUTING -p udp -s 192.168.33.0/24 --dport 53 -j DNAT --to-destination "${dns}:53"
+iptables -t nat -A PREROUTING -p tcp -s 192.168.33.0/24 --dport 53 -j DNAT --to-destination "${dns}:53"
 
-    # Run the cleanup script to remove old iptables rules for an idempotent setup.
-    if [ -f "./awg_clear_firewall_settings.sh" ]; then
-        log "Running firewall cleanup script..."
-        sh ./awg_clear_firewall_settings.sh
-    else
-        log "Firewall cleanup script not found. Manual cleanup may be needed on re-runs."
-    fi
+# Set up NAT
+iptables -t nat -A POSTROUTING -s 192.168.33.0/24 -o awg0 -j MASQUERADE
 
-    # Clean up old routes and rules to prevent errors on re-run.
-    ip route del "$GUEST_NETWORK" dev "$GUEST_BRIDGE" 2>/dev/null || true
-    ip rule del from "$GUEST_NETWORK" table "$VPN_ROUTING_TABLE" 2>/dev/null || true
-    ip rule del from "$GUEST_NETWORK" to "$GUEST_ROUTER_IP" dport 53 2>/dev/null || true
+# Set up firewall AmneziaWG zone
+uci set firewall.awg=zone
+uci set firewall.awg.name='awg'
+uci set firewall.awg.network='awg0'
+uci set firewall.awg.input='ACCEPT'
+uci set firewall.awg.output='ACCEPT'
+uci set firewall.awg.forward='ACCEPT'
+if ! uci show firewall | grep -qE "src='awg'|dest='awg'"; then
+    uci add firewall forwarding
+    uci set firewall.@forwarding[-1].src='guest'
+    uci set firewall.@forwarding[-1].dest='awg'
+    uci add firewall forwarding
+    uci set firewall.@forwarding[-1].src='awg'
+    uci set firewall.@forwarding[-1].dest='guest'
+fi
+uci commit firewall
 
-    log "Setting up policy-based routing for guest network..."
-    ip route add default dev "$VPN_INTERFACE" table "$VPN_ROUTING_TABLE"
-    ip rule add from "$GUEST_NETWORK" to "$GUEST_ROUTER_IP" dport 53 table main pref 100
-    ip rule add from "$GUEST_NETWORK" table "$VPN_ROUTING_TABLE" pref 200
+# Clear routes cache and restart firewall
+echo "Restarting firewall..."
+ip route flush cache
+/etc/init.d/firewall reload
 
-    log "Setting up iptables rules for guest network..."
-    # Allow guest devices to reach the router for local DNS resolution.
-    iptables -A FORWARD -i "$GUEST_BRIDGE" -d "$GUEST_ROUTER_IP" -p tcp --dport 53 -j ACCEPT
-    iptables -A FORWARD -i "$GUEST_BRIDGE" -d "$GUEST_ROUTER_IP" -p udp --dport 53 -j ACCEPT
+# Turn IP-forwarding on
+echo 1 > /proc/sys/net/ipv4/ip_forwar
 
-    # Allow traffic between the guest network and the VPN interface.
-    iptables -A FORWARD -i "$GUEST_BRIDGE" -o "$VPN_INTERFACE" -j ACCEPT
-    iptables -A FORWARD -i "$VPN_INTERFACE" -o "$GUEST_BRIDGE" -j ACCEPT
+# Define the cron command for the watchdog script to run every minute
+CRON_COMMAND="* * * * * sh /data/usr/app/awg/awg_watchdog.sh > /dev/null 2>&1"
 
-    # NAT DNS requests from guest network to the VPN's DNS server.
-    iptables -t nat -A PREROUTING -s "$GUEST_NETWORK" -p udp --dport 53 -j DNAT --to-destination "${FIRST_DNS}:53"
-    iptables -t nat -A PREROUTING -s "$GUEST_NETWORK" -p tcp --dport 53 -j DNAT --to-destination "${FIRST_DNS}:53"
+# Check if the cron job already exists and add it if it doesn't
+if ! crontab -l 2>/dev/null | grep -qF "awg_watchdog.sh"; then
+    echo "Adding cron job for watchdog script..."
+    (crontab -l 2>/dev/null; echo "$CRON_COMMAND") | crontab -
+    echo "Cron job added successfully."
+else
+    echo "Cron job for watchdog script already exists."
+fi
 
-    # NAT all other guest network traffic through the VPN interface.
-    iptables -t nat -A POSTROUTING -s "$GUEST_NETWORK" -o "$VPN_INTERFACE" -j MASQUERADE
-
-    log "Configuring UCI firewall for '$VPN_INTERFACE' zone..."
-    uci set firewall.awg=zone
-    uci set firewall.awg.name='awg'
-    uci set firewall.awg.network="$VPN_INTERFACE"
-    uci set firewall.awg.input='ACCEPT'
-    uci set firewall.awg.output='ACCEPT'
-    uci set firewall.awg.forward='ACCEPT'
-
-    # Add forwarding rules between guest and awg zones if they don't exist.
-    if ! uci show firewall | grep -q "src='guest' && dest='awg'"; then
-        uci add firewall forwarding >/dev/null
-        uci set firewall.@forwarding[-1].src='guest'
-        uci set firewall.@forwarding[-1].dest='awg'
-    fi
-    if ! uci show firewall | grep -q "src='awg' && dest='guest'"; then
-        uci add firewall forwarding >/dev/null
-        uci set firewall.@forwarding[-1].src='awg'
-        uci set firewall.@forwarding[-1].dest='guest'
-    fi
-    uci commit firewall
-
-    log "Reloading firewall and flushing route cache..."
-    ip route flush cache
-    /etc/init.d/firewall reload
-
-    log "Enabling kernel IP forwarding..."
-    echo 1 > /proc/sys/net/ipv4/ip_forward
-}
-
-setup_cron() {
-    log "Setting up watchdog cron job..."
-    local cron_script_path="$SCRIPT_DIR/awg_watchdog.sh"
-    local cron_command="* * * * * sh $cron_script_path > /dev/null 2>&1"
-    local cron_identifier="# AmneziaWG Watchdog"
-
-    # Atomically update the crontab to prevent duplicate entries on re-runs.
-    (crontab -l 2>/dev/null | grep -vF "$cron_identifier" | grep -vF "awg_watchdog.sh"; \
-     echo "$cron_identifier"; \
-     echo "$cron_command") | crontab -
-
-    log "Cron job for watchdog has been configured."
-}
-
-# --- Main Execution ---
-
-main() {
-    # Change to the script's own directory to ensure relative paths work.
-    cd "$SCRIPT_DIR" || die "Could not change to script directory '$SCRIPT_DIR'"
-
-    check_root
-    log "--- Starting AmneziaWG Setup Script ---"
-
-    setup_dependencies
-    create_interface_config
-    reset_and_start_interface
-    setup_routing_and_firewall
-    setup_cron
-
-    log "--- Setup complete. ---"
-}
-
-main "$@"
+echo "Setup complete."
