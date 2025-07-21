@@ -6,7 +6,8 @@ Firmware Version used: `1.1.16`. This forwards all traffic from the guest networ
 
 2.  [**SSH**](https://github.com/openwrt-xiaomi/xmir-patcher) to router:
 
-* update or create your SSH config file (`~/.ssh/config`):
+* xmir-patcher on mac os strictly requires python 3.12 to run
+* to enable easy ssh to router update or create your SSH config file (`~/.ssh/config`):
 
 ```
 # Router
