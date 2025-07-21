@@ -34,27 +34,6 @@ else
     echo "AmneziaWG binaries exist."
 fi
 
-# --- HELPER SCRIPT DOWNLOADS (SEPARATED) ---
-# Download awg_clear_firewall_settings.sh if it doesn't exist
-if [ ! -f "awg_clear_firewall_settings.sh" ]; then
-    echo "Helper script 'awg_clear_firewall_settings.sh' not found. Downloading..."
-    curl -L -o awg_clear_firewall_settings.sh https://github.com/nikita-emelianov/awg-be7000/raw/main/awg_clear_firewall_settings.sh
-    chmod +x awg_clear_firewall_settings.sh
-    echo "Script downloaded and made executable."
-else
-    echo "Helper script 'awg_clear_firewall_settings.sh' exists."
-fi
-
-# Download awg_watchdog.sh if it doesn't exist
-if [ ! -f "awg_watchdog.sh" ]; then
-    echo "Helper script 'awg_watchdog.sh' not found. Downloading..."
-    curl -L -o awg_watchdog.sh https://github.com/nikita-emelianov/awg-be7000/raw/main/awg_watchdog.sh
-    chmod +x awg_watchdog.sh
-    echo "Script downloaded and made executable."
-else
-    echo "Helper script 'awg_watchdog.sh' exists."
-fi
-
 # --- INTERFACE TEARDOWN AND SETUP ---
 echo "Ensuring a clean state for AmneziaWG..."
 kill $(ps w | grep '[a]mneziawg-go' | awk '{print $1}') 2>/dev/null
@@ -121,16 +100,17 @@ echo "Restarting firewall to apply changes..."
 echo "Enabling IP forwarding..."
 echo 1 > /proc/sys/net/ipv4/ip_forward
 
-# Define the cron command for the watchdog script to run every minute
-CRON_COMMAND="* * * * * sh /data/usr/app/awg/awg_watchdog.sh > /dev/null 2>&1"
+# Get the absolute path to this script
+SCRIPT_PATH=$(readlink -f "$0")
+CRON_COMMAND="@reboot sleep 15 && sh $SCRIPT_PATH > /tmp/awg_startup.log 2>&1"
 
 # Check if the cron job already exists and add it if it doesn't
-if ! crontab -l 2>/dev/null | grep -qF "awg_watchdog.sh"; then
-    echo "Adding cron job for watchdog script..."
+if ! crontab -l 2>/dev/null | grep -qF "$CRON_COMMAND"; then
+    echo "Adding cron job for auto-startup on reboot..."
     (crontab -l 2>/dev/null; echo "$CRON_COMMAND") | crontab -
     echo "Cron job added successfully."
 else
-    echo "Cron job for watchdog script already exists."
+    echo "Cron job for auto-startup already exists."
 fi
 
 echo "Setup complete."
