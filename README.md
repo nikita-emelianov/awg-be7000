@@ -28,6 +28,8 @@ PubkeyAcceptedAlgorithms +ssh-rsa
     chmod +x awg_setup.sh
     ./awg_setup.sh
     ```
+note:
+while running `./awg_setup.sh` you'll see error `Failed with exit code 1 from /etc/firewall.d/qca-nss-ecm` but it doesn't break your awg setup as it comes from a system script (/etc/firewall.d/qca-nss-ecm) that's called when firewall reloads.
 
 -----
 
