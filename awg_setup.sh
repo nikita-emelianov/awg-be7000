@@ -123,8 +123,9 @@ uci commit firewall
 
 # Clear routes cache and restart firewall
 echo "Restarting firewall..."
+# Filter out the specific error message from qca-nss-ecm
 ip route flush cache
-/etc/init.d/firewall reload
+/etc/init.d/firewall reload 2>&1 | grep -v '! Failed with exit code 1'
 
 # Turn IP-forwarding on
 echo 1 > /proc/sys/net/ipv4/ip_forward # Corrected: 'ip_forwar' changed to 'ip_forward'
