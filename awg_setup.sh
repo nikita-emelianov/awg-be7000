@@ -32,9 +32,9 @@ fi
 if [ ! -f "awg" ] || [ ! -f "amneziawg-go" ]; then
     echo "AmneziaWG binaries not found. Downloading..."
     # Download the compressed archive containing the binaries
-    curl -L -o awg.tar.gz https://github.com/nikita-emelianov/awg-be7000/raw/main/awg.tar.gz
+    curl -L -o awg.tar.gz https://github.com/alexandershalin/amneziawg-be7000/raw/main/awg.tar.gz
     # Download a script for clearing firewall settings (if needed)
-    curl -L -o clear_firewall_settings.sh https://github.com/nikita-emelianov/awg-be7000/raw/main/clear_firewall_settings.sh
+    curl -L -o clear_firewall_settings.sh https://github.com/alexandershalin/amneziawg-be7000/raw/main/clear_firewall_settings.sh
     # Extract the contents of the archive
     tar -xzvf /data/usr/app/awg/awg.tar.gz
     # Make the downloaded binaries and script executable
@@ -89,6 +89,8 @@ ip l set up awg0
 
 # --- END INTERFACE SETUP AND DAEMON MANAGEMENT SECTION ---
 
+# /data/usr/app/awg/awg - check connection (This line is a comment in the original script)
+
 # Delete existing route for guest network
 ip route del 192.168.33.0/24 dev br-guest 2>/dev/null # Added 2>/dev/null for robustness
 
@@ -98,22 +100,8 @@ ip route add default dev awg0 table 200
 ip rule add from 192.168.33.0/24 to 192.168.33.1 dport 53 table main pref 100
 ip rule add from 192.168.33.0/24 table 200 pref 200
 
-# Set up firewall for DNS requests
-iptables -A FORWARD -i br-guest -d 192.168.33.1 -p tcp --dport 53 -j ACCEPT
-iptables -A FORWARD -i br-guest -d 192.168.33.1 -p udp --dport 53 -j ACCEPT
-iptables -A FORWARD -i br-guest -s 192.168.33.1 -p tcp --sport 53 -j ACCEPT
-iptables -A FORWARD -i br-guest -s 192.168.33.1 -p udp --sport 53 -j ACCEPT
-
-# Common rules for traffic
-iptables -A FORWARD -i br-guest -o awg0 -j ACCEPT
-iptables -A FORWARD -i awg0 -o br-guest -j ACCEPT
-
-# Set up NAT for DNS requests from guest network
-iptables -t nat -A PREROUTING -p udp -s 192.168.33.0/24 --dport 53 -j DNAT --to-destination "${dns}:53"
-iptables -t nat -A PREROUTING -p tcp -s 192.168.33.0/24 --dport 53 -j DNAT --to-destination "${dns}:53"
-
-# Set up NAT
-iptables -t nat -A POSTROUTING -s 192.168.33.0/24 -o awg0 -j MASQUERADE
+# --- REMOVED DIRECT IPTABLES RULES. Relying on UCI firewall configuration for persistence. ---
+# The UCI firewall rules (below) should handle forwarding and NAT for the awg zone.
 
 # Set up firewall AmneziaWG zone
 uci set firewall.awg=zone
@@ -122,6 +110,9 @@ uci set firewall.awg.network='awg0'
 uci set firewall.awg.input='ACCEPT'
 uci set firewall.awg.output='ACCEPT'
 uci set firewall.awg.forward='ACCEPT'
+# Add masquerading for the awg zone if it's acting as an egress to the internet
+uci set firewall.awg.masq='1' # Explicitly enable masquerading for the awg zone
+
 if ! uci show firewall | grep -qE "src='awg'|dest='awg'"; then
     uci add firewall forwarding
     uci set firewall.@forwarding[-1].src='guest'
@@ -138,4 +129,4 @@ ip route flush cache
 /etc/init.d/firewall reload
 
 # Turn IP-forwarding on
-echo 1 > /proc/sys/net/ipv4/ip_forwar
+echo 1 > /proc/sys/net/ipv4/ip_forward # Corrected: 'ip_forwar' changed to 'ip_forward'
