@@ -89,8 +89,6 @@ ip l set up awg0
 
 # --- END INTERFACE SETUP AND DAEMON MANAGEMENT SECTION ---
 
-# /data/usr/app/awg/awg - check connection (This line is a comment in the original script)
-
 # Delete existing route for guest network
 ip route del 192.168.33.0/24 dev br-guest 2>/dev/null # Added 2>/dev/null for robustness
 
