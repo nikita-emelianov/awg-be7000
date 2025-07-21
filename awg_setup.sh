@@ -111,7 +111,8 @@ uci set firewall.awg.forward='ACCEPT'
 # Add masquerading for the awg zone if it's acting as an egress to the internet
 uci set firewall.awg.masq='1' # Explicitly enable masquerading for the awg zone
 
-if ! uci show firewall | grep -qE "src='awg'|dest='awg'"; then
+# Corrected syntax for 'if ! command | command'
+if ! (uci show firewall | grep -qE "src='awg'|dest='awg'"); then
     uci add firewall forwarding
     uci set firewall.@forwarding[-1].src='guest'
     uci set firewall.@forwarding[-1].dest='awg'
