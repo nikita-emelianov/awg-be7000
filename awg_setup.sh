@@ -130,7 +130,7 @@ echo 1 > /proc/sys/net/ipv4/ip_forward
 
 # Get the absolute path to this script
 SCRIPT_PATH=$(readlink -f "$0")
-STARTUP_COMMAND="sleep 20 && sh $SCRIPT_PATH &"
+STARTUP_COMMAND="sleep 15 && sh $SCRIPT_PATH &"
 RC_LOCAL_FILE="/etc/rc.local"
 
 # Check if the command is already in rc.local to avoid adding it again
