@@ -121,17 +121,16 @@ echo "Restarting firewall to apply changes..."
 echo "Enabling IP forwarding..."
 echo 1 > /proc/sys/net/ipv4/ip_forward
 
-# Get the absolute path to this script
-SCRIPT_PATH=$(readlink -f "$0")
-CRON_COMMAND="@reboot sleep 15 && sh $SCRIPT_PATH > /tmp/awg_startup.log 2>&1"
+# Define the cron command for the watchdog script to run every minute
+CRON_COMMAND="* * * * * sh /data/usr/app/awg/awg_watchdog.sh > /dev/null 2>&1"
 
 # Check if the cron job already exists and add it if it doesn't
-if ! crontab -l 2>/dev/null | grep -qF "$CRON_COMMAND"; then
-    echo "Adding cron job for auto-startup on reboot..."
+if ! crontab -l 2>/dev/null | grep -qF "awg_watchdog.sh"; then
+    echo "Adding cron job for watchdog script..."
     (crontab -l 2>/dev/null; echo "$CRON_COMMAND") | crontab -
     echo "Cron job added successfully."
 else
-    echo "Cron job for auto-startup already exists."
+    echo "Cron job for watchdog script already exists."
 fi
 
 echo "Setup complete."
