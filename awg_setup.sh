@@ -34,15 +34,25 @@ else
     echo "AmneziaWG binaries exist."
 fi
 
-# --- HELPER SCRIPT DOWNLOAD (NEW SECTION) ---
-if [ ! -f "awg_clear_firewall_settings.sh" ] || [ ! -f "awg_watchdog.sh" ]; then
-    echo "Helper scripts not found. Downloading..."
+# --- HELPER SCRIPT DOWNLOADS (SEPARATED) ---
+# Download awg_clear_firewall_settings.sh if it doesn't exist
+if [ ! -f "awg_clear_firewall_settings.sh" ]; then
+    echo "Helper script 'awg_clear_firewall_settings.sh' not found. Downloading..."
     curl -L -o awg_clear_firewall_settings.sh https://github.com/nikita-emelianov/awg-be7000/raw/main/awg_clear_firewall_settings.sh
-    curl -L -o awg_watchdog.sh https://github.com/nikita-emelianov/awg-be7000/raw/main/awg_watchdog.sh
-    chmod +x awg_clear_firewall_settings.sh awg_watchdog.sh
-    echo "Helper scripts downloaded and made executable."
+    chmod +x awg_clear_firewall_settings.sh
+    echo "Script downloaded and made executable."
 else
-    echo "Helper scripts exist."
+    echo "Helper script 'awg_clear_firewall_settings.sh' exists."
+fi
+
+# Download awg_watchdog.sh if it doesn't exist
+if [ ! -f "awg_watchdog.sh" ]; then
+    echo "Helper script 'awg_watchdog.sh' not found. Downloading..."
+    curl -L -o awg_watchdog.sh https://github.com/nikita-emelianov/awg-be7000/raw/main/awg_watchdog.sh
+    chmod +x awg_watchdog.sh
+    echo "Script downloaded and made executable."
+else
+    echo "Helper script 'awg_watchdog.sh' exists."
 fi
 
 # --- INTERFACE TEARDOWN AND SETUP ---
