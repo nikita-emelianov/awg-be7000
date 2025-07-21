@@ -27,25 +27,37 @@ else
     echo "$interface_config created."
 fi
 
-# Downloading AmneziaWG binaries if needed
-# Check if both 'awg' and 'amneziawg-go' binaries exist in the current directory
+# --- DEPENDENCY DOWNLOAD ---
 if [ ! -f "awg" ] || [ ! -f "amneziawg-go" ]; then
     echo "AmneziaWG binaries not found. Downloading..."
-    # Download the compressed archive containing the binaries
     curl -L -o awg.tar.gz https://github.com/nikita-emelianov/awg-be7000/raw/main/awg.tar.gz
-    # Download a script for clearing firewall settings (if needed)
-    curl -L -o clear_firewall_settings.sh https://github.com/nikita-emelianov/awg-be7000/raw/main/clear_firewall_settings.sh
-    # Extract the contents of the archive
-    tar -xzvf /data/usr/app/awg/awg.tar.gz
-    # Make the downloaded binaries and script executable
-    chmod +x /data/usr/app/awg/amneziawg-go
-    chmod +x /data/usr/app/awg/awg
-    chmod +x /data/usr/app/awg/clear_firewall_settings.sh
-    # Remove the downloaded archive to save space
-    rm /data/usr/app/awg/awg.tar.gz
-    echo "Archive downloaded and unpacked. Proceeding with awg0 interface setup."
+    tar -xzvf awg.tar.gz
+    chmod +x amneziawg-go awg
+    rm awg.tar.gz
+    echo "Archive downloaded and unpacked."
 else
-    echo "AmneziaWG binaries exist, proceeding with awg0 interface setup."
+    echo "AmneziaWG binaries exist, proceeding."
+fi
+
+# --- HELPER SCRIPT DOWNLOADS (SEPARATED) ---
+# Download awg_clear_firewall_settings.sh if it doesn't exist
+if [ ! -f "awg_clear_firewall_settings.sh" ]; then
+    echo "Helper script 'awg_clear_firewall_settings.sh' not found. Downloading..."
+    curl -L -o awg_clear_firewall_settings.sh https://github.com/nikita-emelianov/awg-be7000/raw/main/awg_clear_firewall_settings.sh
+    chmod +x awg_clear_firewall_settings.sh
+    echo "Script downloaded and made executable."
+else
+    echo "Helper script 'awg_clear_firewall_settings.sh' exists."
+fi
+
+# Download awg_watchdog.sh if it doesn't exist
+if [ ! -f "awg_watchdog.sh" ]; then
+    echo "Helper script 'awg_watchdog.sh' not found. Downloading..."
+    curl -L -o awg_watchdog.sh https://github.com/nikita-emelianov/awg-be7000/raw/main/awg_watchdog.sh
+    chmod +x awg_watchdog.sh
+    echo "Script downloaded and made executable."
+else
+    echo "Helper script 'awg_watchdog.sh' exists."
 fi
 
 # --- INTERFACE SETUP AND DAEMON MANAGEMENT SECTION ---
