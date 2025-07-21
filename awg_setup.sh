@@ -1,5 +1,10 @@
 #!/bin/sh
 
+# Change to the script's own directory to ensure all relative paths work correctly.
+# This is critical for running the script via cron.
+SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+cd "$SCRIPT_DIR" || exit 1
+
 # Define configuration file paths
 config_file="amnezia_for_awg.conf"
 interface_config="awg0.conf"
