@@ -151,4 +151,17 @@ ip route flush cache
 
 # Turn IP-forwarding on
 echo 1 > /proc/sys/net/ipv4/ip_forwar
-#unique12
+
+# Define the cron command for the watchdog script to run every minute
+CRON_COMMAND="* * * * * sh /data/usr/app/awg/awg_watchdog.sh > /dev/null 2>&1"
+
+# Check if the cron job already exists and add it if it doesn't
+if ! crontab -l 2>/dev/null | grep -qF "awg_watchdog.sh"; then
+    echo "Adding cron job for watchdog script..."
+    (crontab -l 2>/dev/null; echo "$CRON_COMMAND") | crontab -
+    echo "Cron job added successfully."
+else
+    echo "Cron job for watchdog script already exists."
+fi
+
+echo "Setup complete."
