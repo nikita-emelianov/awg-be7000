@@ -30,3 +30,5 @@ PubkeyAcceptedAlgorithms +ssh-rsa
     ```
 
 -----
+
+if you ever want to uninstall awg or start over with a fresh awg configuration, you'd run `clear_firewall_settings.sh` script
