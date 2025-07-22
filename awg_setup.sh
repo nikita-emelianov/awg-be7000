@@ -1,7 +1,6 @@
 #!/bin/sh
 
-# Change to the script's own directory to ensure all relative paths work correctly.
-# This is critical for running the script via cron.
+# Change to the script's own directory
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 cd "$SCRIPT_DIR" || exit 1
 
@@ -18,13 +17,12 @@ fi
 # Extract client address and DNS from the configuration file
 address=$(awk -F' = ' '/^Address/ {print $2}' "$config_file")
 dns=$(awk -F' = ' '/^DNS/ {print $2}' "$config_file")
-# Take only the first DNS server if multiple are listed
 dns=$(echo "$dns" | cut -d',' -f1)
 
 echo "AmneziaWG client address: $address"
 echo "DNS: $dns"
 
-# Create awg0.conf if it doesn't exist, excluding Address and DNS lines
+# Create awg0.conf if it doesn't exist
 if [ -f "$interface_config" ]; then
     echo "$interface_config already exists."
 else
@@ -34,17 +32,13 @@ fi
 
 # --- DEPENDENCY DOWNLOAD ---
 if [ ! -f "awg" ] || [ ! -f "amneziawg-go" ]; then
-    echo "AmneziaWG binaries not found. Downloading..."
     curl -L -o awg.tar.gz https://github.com/nikita-emelianov/awg-be7000/raw/main/awg.tar.gz
     tar -xzvf awg.tar.gz
     chmod +x amneziawg-go awg
     rm awg.tar.gz
-    echo "Archive downloaded and unpacked."
-else
-    echo "AmneziaWG binaries exist, proceeding."
 fi
 
-# --- HELPER SCRIPT DOWNLOADS (SEPARATED) ---
+# --- HELPER SCRIPT DOWNLOADS ---
 if [ ! -f "awg_clear_firewall_settings.sh" ]; then
     curl -L -o awg_clear_firewall_settings.sh https://github.com/nikita-emelianov/awg-be7000/raw/main/awg_clear_firewall_settings.sh && chmod +x awg_clear_firewall_settings.sh
 fi
@@ -55,10 +49,7 @@ fi
 # --- INTERFACE SETUP AND DAEMON MANAGEMENT SECTION ---
 echo "Ensuring a clean state for awg0 interface and amneziawg-go daemon..."
 PID=$(ps | grep amneziawg-go | grep -v grep | awk '{print $1}')
-if [ -n "$PID" ]; then
-    kill "$PID" 2>/dev/null
-    sleep 1
-fi
+[ -n "$PID" ] && kill "$PID" 2>/dev/null && sleep 1
 if ip link show awg0 > /dev/null 2>&1; then
     ip link set dev awg0 down 2>/dev/null
     ip link del dev awg0 2>/dev/null
@@ -68,10 +59,9 @@ echo "Starting amneziawg-go daemon in the background..."
 /data/usr/app/awg/amneziawg-go awg0 &
 sleep 2
 if ! ip link show awg0 > /dev/null 2>&1; then
-    echo "Error: awg0 interface was not created by amneziawg-go daemon. Aborting setup."
+    echo "Error: awg0 interface was not created. Aborting setup."
     exit 1
 fi
-echo "awg0 interface successfully created by amneziawg-go daemon."
 echo "Applying AmneziaWG configuration and IP address."
 /data/usr/app/awg/awg setconf awg0 /data/usr/app/awg/awg0.conf
 ip a add "$address" dev awg0
@@ -85,14 +75,18 @@ ip rule add from 192.168.33.0/24 to 192.168.33.1 dport 53 table main pref 100
 ip rule add from 192.168.33.0/24 table 200 pref 200
 
 # --- FIREWALL RULES ---
-
-# --- !! NEW SECTION !! ---
-# Flush existing rules to prevent duplicates on re-run
 echo "Flushing old iptables rules..."
 iptables -F FORWARD
 iptables -t nat -F PREROUTING
 iptables -t nat -F POSTROUTING
-# --- !! END NEW SECTION !! ---
+iptables -t mangle -F FORWARD
+
+# --- !! NEW MSS CLAMPING RULE !! ---
+# Fix for TCP connections hanging over VPN (MTU issue)
+iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -o awg0 -j TCPMSS --set-mss 1380
+
+# Explicitly REJECT IPv6 traffic from the guest network to force fallback to IPv4
+ip6tables -A FORWARD -i br-guest -j REJECT
 
 # Set up firewall for local DNS requests on the router itself
 iptables -A FORWARD -i br-guest -d 192.168.33.1 -p tcp --dport 53 -j ACCEPT
@@ -111,9 +105,6 @@ iptables -t nat -A PREROUTING -p tcp -s 192.168.33.0/24 --dport 53 -j DNAT --to-
 # Set up NAT for all other guest network traffic
 iptables -t nat -A POSTROUTING -s 192.168.33.0/24 -o awg0 -j MASQUERADE
 
-# Explicitly REJECT IPv6 traffic from the guest network to force fallback to IPv4
-ip6tables -A FORWARD -i br-guest -j REJECT
-
 # --- UCI & SERVICE SETUP ---
 uci set firewall.awg=zone
 uci set firewall.awg.name='awg'
@@ -131,6 +122,7 @@ if ! uci show firewall | grep -qE "src='awg'|dest='awg'"; then
 fi
 uci commit firewall
 
+# Finalize
 echo "Restarting firewall..."
 ip route flush cache
 /etc/init.d/firewall reload
@@ -139,11 +131,7 @@ echo 1 > /proc/sys/net/ipv4/ip_forward
 # --- CRON JOB ---
 CRON_COMMAND="* * * * * sh /data/usr/app/awg/awg_watchdog.sh > /dev/null 2>&1"
 if ! crontab -l 2>/dev/null | grep -qF "awg_watchdog.sh"; then
-    echo "Adding cron job for watchdog script..."
     (crontab -l 2>/dev/null; echo "$CRON_COMMAND") | crontab -
-    echo "Cron job added successfully."
-else
-    echo "Cron job for watchdog script already exists."
 fi
 
 echo "Setup complete."
