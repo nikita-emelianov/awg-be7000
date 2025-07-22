@@ -134,5 +134,4 @@ crontab -l 2>/dev/null | grep -qF "awg_watchdog.sh" || {
   (crontab -l 2>/dev/null; echo "$CRON_CMD") | crontab -
 }
 
-echo "✅ Setup complete."
-echo "📡 Android devices should now work with VPN and no insecure errors."
+echo "Setup complete."
