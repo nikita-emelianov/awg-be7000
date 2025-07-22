@@ -5,6 +5,9 @@
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 cd "$SCRIPT_DIR" || exit 1
 
+# <<< NEW: Define the log file path >>>
+LOG_FILE="/tmp/guest_vpn_traffic.log"
+
 # Define configuration file paths
 config_file="amnezia_for_awg.conf"
 interface_config="awg0.conf"
@@ -91,13 +94,18 @@ echo "Flushing old firewall rules..."
 iptables -F FORWARD
 iptables -t nat -F PREROUTING
 iptables -t nat -F POSTROUTING
-iptables -t mangle -F FORWARD # <<< CHANGE: Flush mangle table
-ip6tables -F FORWARD          # <<< CHANGE: Flush ip6tables FORWARD chain
+iptables -t mangle -F FORWARD
+ip6tables -F FORWARD
 
-# <<< CHANGE: Block all IPv6 traffic on the guest network to prevent leaks >>>
+# Block all IPv6 traffic on the guest network to prevent leaks
 echo "Blocking IPv6 on guest network..."
 ip6tables -A FORWARD -i br-guest -j DROP
 ip6tables -A FORWARD -o br-guest -j DROP
+
+# <<< NEW: Add a specific LOG rule for all guest traffic >>>
+# This will log packets before they hit other rules, so we can see everything.
+# We use a unique prefix to easily find it in the logs.
+iptables -A FORWARD -i br-guest -j LOG --log-prefix "GUEST-VPN-DEBUG: " --log-level 7
 
 # Set up firewall for local DNS requests on the router itself
 iptables -A FORWARD -i br-guest -d 192.168.33.1 -p tcp --dport 53 -j ACCEPT
@@ -116,9 +124,9 @@ iptables -t nat -A PREROUTING -p tcp -s 192.168.33.0/24 --dport 53 -j DNAT --to-
 # Set up NAT for all other guest network traffic
 iptables -t nat -A POSTROUTING -s 192.168.33.0/24 -o awg0 -j MASQUERADE
 
-# <<< CHANGE: Clamp TCP MSS to fix mobile connectivity issues (MTU) >>>
+# Clamp TCP MSS to fix mobile connectivity issues (MTU)
 echo "Clamping TCP MSS to prevent MTU issues..."
-iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -o awg0 -j TCPMSS --set-mss 1432
+iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -o awg0 -j TCPMSS --set-mss 1360
 
 # --- UCI & SERVICE SETUP ---
 uci set firewall.awg=zone
@@ -152,4 +160,20 @@ else
     echo "Cron job for watchdog script already exists."
 fi
 
-echo "Setup complete!!"
+# --- LOGGING SETUP ---
+echo "Setting up traffic logging to $LOG_FILE..."
+
+# Kill any previously running logger process to avoid duplicates.
+# The brackets in [l]ogread prevent the pkill command from finding itself.
+pkill -f "[l]ogread -f.*GUEST-VPN-DEBUG"
+
+# Clear the old log file and add a timestamp.
+echo "--- Log started at $(date) ---" > "$LOG_FILE"
+
+# Start the logger process in the background. It reads the system log,
+# filters for our unique prefix, and appends to our file.
+logread -f | grep "GUEST-VPN-DEBUG" >> "$LOG_FILE" &
+
+echo "Logging process has been started."
+echo "✅ Watch the log in a separate terminal with: tail -f $LOG_FILE"
+echo "Setup complete"
