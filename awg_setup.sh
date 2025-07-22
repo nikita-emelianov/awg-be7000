@@ -98,9 +98,6 @@ iptables -t nat -A POSTROUTING -s 192.168.33.0/24 -o awg0 -j MASQUERADE
 # MSS Clamping for MTU issues
 iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -o awg0 -j TCPMSS --clamp-mss-to-pmtu
 
-# Optional: logging guest traffic
-iptables -I FORWARD 1 -i br-guest -j LOG --log-prefix "GUEST-VPN-DEBUG: " --log-level 7
-
 # UCI firewall zone
 echo "Configuring UCI firewall..."
 uci set firewall.awg=zone
@@ -138,5 +135,4 @@ crontab -l 2>/dev/null | grep -qF "awg_watchdog.sh" || {
 }
 
 echo "✅ Setup complete."
-echo "📡 Android devices should now work with full DNS + HTTPS compatibility."
-echo "💡 Tip: check traffic with 'logread -f | grep GUEST-VPN-DEBUG'"
+echo "📡 Android devices should now work with VPN and no insecure errors."
