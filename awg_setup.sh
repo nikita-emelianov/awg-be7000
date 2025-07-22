@@ -89,14 +89,32 @@ ip rule add from 192.168.33.0/24 table 200 pref 200
 
 # --- FIREWALL RULES ---
 
-# --- !! NEW SECTION !! ---
-# Flush existing rules to prevent duplicates on re-run
-echo "Flushing old iptables rules..."
+# --- FIREWALL RULE FLUSHING ---
+# Flush existing rules to prevent duplicates and ensure a clean state on re-run.
+echo "Flushing old iptables & ip6tables rules..."
+# Flush IPv4 tables
 iptables -F FORWARD
 iptables -t nat -F PREROUTING
 iptables -t nat -F POSTROUTING
-# --- !! END NEW SECTION !! ---
+iptables -t mangle -F FORWARD
+# Flush IPv6 tables to prepare for blocking rules
+ip6tables -F FORWARD 2>/dev/null
 
+# --- !! NEW: IPV6 BLOCKING (FIX FOR MOBILE CONNECTIVITY) !! ---
+# Mobile devices often prefer IPv6, which can cause connection hangs if the VPN
+# tunnel does not support it. This rule rejects IPv6 traffic from the guest
+# network to force devices to fall back to IPv4 immediately.
+echo "Blocking IPv6 on guest network to prevent VPN hangs..."
+ip6tables -A FORWARD -i br-guest -j REJECT
+
+# --- !! NEW: TCP MSS CLAMPING (FIX FOR MOBILE CONNECTIVITY) !! ---
+# This is a critical fix for issues where some sites/apps load but others don't.
+# It prevents packet fragmentation over the VPN tunnel by lowering the
+# Maximum Segment Size (MSS) of TCP packets to fit within the VPN's MTU.
+echo "Applying TCP MSS clamping for VPN interface..."
+iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -o awg0 -j TCPMSS --set-mss 1240
+
+# --- FIREWALL RULES (CONTINUED) ---
 # Set up firewall for local DNS requests on the router itself
 iptables -A FORWARD -i br-guest -d 192.168.33.1 -p tcp --dport 53 -j ACCEPT
 iptables -A FORWARD -i br-guest -d 192.168.33.1 -p udp --dport 53 -j ACCEPT
@@ -150,4 +168,4 @@ else
     echo "Cron job for watchdog script already exists."
 fi
 
-echo "Setup complete!"
+echo "Setup complete"
