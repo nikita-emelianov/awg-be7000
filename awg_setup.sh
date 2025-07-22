@@ -118,7 +118,7 @@ iptables -t nat -A POSTROUTING -s 192.168.33.0/24 -o awg0 -j MASQUERADE
 
 # <<< CHANGE: Clamp TCP MSS to fix mobile connectivity issues (MTU) >>>
 echo "Clamping TCP MSS to prevent MTU issues..."
-iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -o awg0 -j TCPMSS --set-mss 1360
+iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -o awg0 -j TCPMSS --set-mss 1432
 
 # --- UCI & SERVICE SETUP ---
 uci set firewall.awg=zone
