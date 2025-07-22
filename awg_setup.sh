@@ -86,13 +86,18 @@ ip rule add from 192.168.33.0/24 table 200 pref 200
 
 # --- FIREWALL RULES ---
 
-# --- !! NEW SECTION !! ---
 # Flush existing rules to prevent duplicates on re-run
-echo "Flushing old iptables rules..."
+echo "Flushing old firewall rules..."
 iptables -F FORWARD
 iptables -t nat -F PREROUTING
 iptables -t nat -F POSTROUTING
-# --- !! END NEW SECTION !! ---
+iptables -t mangle -F FORWARD # <<< CHANGE: Flush mangle table
+ip6tables -F FORWARD          # <<< CHANGE: Flush ip6tables FORWARD chain
+
+# <<< CHANGE: Block all IPv6 traffic on the guest network to prevent leaks >>>
+echo "Blocking IPv6 on guest network..."
+ip6tables -A FORWARD -i br-guest -j DROP
+ip6tables -A FORWARD -o br-guest -j DROP
 
 # Set up firewall for local DNS requests on the router itself
 iptables -A FORWARD -i br-guest -d 192.168.33.1 -p tcp --dport 53 -j ACCEPT
@@ -110,6 +115,10 @@ iptables -t nat -A PREROUTING -p tcp -s 192.168.33.0/24 --dport 53 -j DNAT --to-
 
 # Set up NAT for all other guest network traffic
 iptables -t nat -A POSTROUTING -s 192.168.33.0/24 -o awg0 -j MASQUERADE
+
+# <<< CHANGE: Clamp TCP MSS to fix mobile connectivity issues (MTU) >>>
+echo "Clamping TCP MSS to prevent MTU issues..."
+iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -o awg0 -j TCPMSS --set-mss 1360
 
 # --- UCI & SERVICE SETUP ---
 uci set firewall.awg=zone
