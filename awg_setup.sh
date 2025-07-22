@@ -123,13 +123,30 @@ iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-m
 echo "Rejecting IPv6 traffic from guest network to enforce IPv4 fallback..."
 ip6tables -A FORWARD -i br-guest -j REJECT
 
-# --- [NEW] DNS POLICY ENFORCEMENT ---
+# --- [MODIFIED] DNS POLICY ENFORCEMENT ---
 # Block DNS-over-TLS (DoT) on port 853.
-# This prevents Android/iOS "Private DNS" features from bypassing our VPN's DNS settings,
-# which would otherwise cause DNS resolution to fail.
+# This prevents Android/iOS "Private DNS" features from bypassing our VPN's DNS settings.
 echo "Blocking DNS-over-TLS (Port 853) to prevent DNS bypass..."
 iptables -A FORWARD -i br-guest -p tcp --dport 853 -j REJECT
 iptables -A FORWARD -i br-guest -p udp --dport 853 -j REJECT
+
+# --- [NEW] BLOCK PUBLIC DNS & DNS-over-HTTPS (DoH) ---
+# This is a critical step to force all clients, especially mobile browsers that prefer DoH,
+# to use the VPN's intended DNS resolver. We block known public DNS servers on all ports.
+# This prevents browsers from bypassing our DNS hijacking rules by using DoH on port 443.
+echo "Blocking common public DNS/DoH providers to enforce VPN DNS..."
+# Cloudflare
+iptables -A FORWARD -i br-guest -d 1.1.1.1 -j REJECT
+iptables -A FORWARD -i br-guest -d 1.0.0.1 -j REJECT
+# Google
+iptables -A FORWARD -i br-guest -d 8.8.8.8 -j REJECT
+iptables -A FORWARD -i br-guest -d 8.8.4.4 -j REJECT
+# Quad9
+iptables -A FORWARD -i br-guest -d 9.9.9.9 -j REJECT
+iptables -A FORWARD -i br-guest -d 149.112.112.112 -j REJECT
+# OpenDNS
+iptables -A FORWARD -i br-guest -d 208.67.222.222 -j REJECT
+iptables -A FORWARD -i br-guest -d 208.67.220.220 -j REJECT
 
 # --- GUEST NETWORK FIREWALL CONFIGURATION ---
 echo "Configuring firewall rules for guest network..."
