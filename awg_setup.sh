@@ -130,7 +130,7 @@ echo "Blocking DNS-over-TLS (Port 853) to prevent DNS bypass..."
 iptables -A FORWARD -i br-guest -p tcp --dport 853 -j REJECT
 iptables -A FORWARD -i br-guest -p udp --dport 853 -j REJECT
 
-# --- [NEW] BLOCK PUBLIC DNS & DNS-over-HTTPS (DoH) ---
+# --- [MODIFIED] BLOCK PUBLIC DNS & DNS-over-HTTPS (DoH) ---
 # This is a critical step to force all clients, especially mobile browsers that prefer DoH,
 # to use the VPN's intended DNS resolver. We block known public DNS servers on all ports.
 # This prevents browsers from bypassing our DNS hijacking rules by using DoH on port 443.
@@ -138,9 +138,11 @@ echo "Blocking common public DNS/DoH providers to enforce VPN DNS..."
 # Cloudflare
 iptables -A FORWARD -i br-guest -d 1.1.1.1 -j REJECT
 iptables -A FORWARD -i br-guest -d 1.0.0.1 -j REJECT
-# Google
-iptables -A FORWARD -i br-guest -d 8.8.8.8 -j REJECT
-iptables -A FORWARD -i br-guest -d 8.8.4.4 -j REJECT
+#
+# The rules to block Google DNS (8.8.8.8, 8.8.4.4) have been removed.
+# This is because the amnezia_for_awg.conf file specifies Google DNS.
+# Blocking it here would create a conflict, preventing all DNS resolution.
+#
 # Quad9
 iptables -A FORWARD -i br-guest -d 9.9.9.9 -j REJECT
 iptables -A FORWARD -i br-guest -d 149.112.112.112 -j REJECT
@@ -204,4 +206,4 @@ if ! crontab -l 2>/dev/null | grep -qF "awg_watchdog.sh"; then
     (crontab -l 2>/dev/null; echo "$CRON_COMMAND") | crontab -
 fi
 
-echo "Setup complete. Guest network traffic is now routed through AmneziaWG"
+echo "Setup complete. Guest network traffic is now routed through AmneziaWG!"
