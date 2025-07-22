@@ -204,4 +204,4 @@ if ! crontab -l 2>/dev/null | grep -qF "awg_watchdog.sh"; then
     (crontab -l 2>/dev/null; echo "$CRON_COMMAND") | crontab -
 fi
 
-echo "Setup complete. Guest network traffic is now routed through AmneziaWG."
+echo "Setup complete. Guest network traffic is now routed through AmneziaWG"
