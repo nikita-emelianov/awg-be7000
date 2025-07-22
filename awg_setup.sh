@@ -77,6 +77,9 @@ echo "Applying AmneziaWG configuration and IP address."
 ip a add "$address" dev awg0
 ip l set up awg0
 
+# --- PATCH: Set lower MTU for compatibility with Android ---
+ip link set dev awg0 mtu 1280
+
 # --- ROUTING RULES ---
 ip route del 192.168.33.0/24 dev br-guest 2>/dev/null
 ip route add 192.168.33.0/24 dev br-guest table main
@@ -107,6 +110,10 @@ iptables -A FORWARD -i awg0 -o br-guest -j ACCEPT
 # Set up NAT for DNS requests from guest network (redirect to VPN's DNS)
 iptables -t nat -A PREROUTING -p udp -s 192.168.33.0/24 --dport 53 -j DNAT --to-destination "${dns}:53"
 iptables -t nat -A PREROUTING -p tcp -s 192.168.33.0/24 --dport 53 -j DNAT --to-destination "${dns}:53"
+
+# --- PATCH: Force redirect DNS requests to 8.8.8.8 to working VPN DNS ---
+iptables -t nat -A PREROUTING -s 192.168.33.0/24 -d 8.8.8.8 -p udp --dport 53 -j DNAT --to-destination "${dns}:53"
+iptables -t nat -A PREROUTING -s 192.168.33.0/24 -d 8.8.8.8 -p tcp --dport 53 -j DNAT --to-destination "${dns}:53"
 
 # Set up NAT for all other guest network traffic
 iptables -t nat -A POSTROUTING -s 192.168.33.0/24 -o awg0 -j MASQUERADE
@@ -143,4 +150,4 @@ else
     echo "Cron job for watchdog script already exists."
 fi
 
-echo "Setup complete."
+echo "Setup complete!"
