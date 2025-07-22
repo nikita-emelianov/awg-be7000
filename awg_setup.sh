@@ -50,6 +50,9 @@ echo "Configuring awg0..."
 ip addr add "$ADDRESS" dev awg0
 ip link set up awg0
 
+# Lower MTU for guest bridge
+ip link set dev br-guest mtu 1280
+
 # Routing
 echo "Applying routing rules..."
 ip route del 192.168.33.0/24 dev br-guest 2>/dev/null
@@ -63,18 +66,40 @@ echo "Applying iptables rules..."
 iptables -F FORWARD
 iptables -t nat -F PREROUTING
 iptables -t nat -F POSTROUTING
+iptables -t mangle -F
 
+# Allow DNS to router
 iptables -A FORWARD -i br-guest -d 192.168.33.1 -p udp --dport 53 -j ACCEPT
 iptables -A FORWARD -i br-guest -d 192.168.33.1 -p tcp --dport 53 -j ACCEPT
 iptables -A FORWARD -i br-guest -s 192.168.33.1 -p udp --sport 53 -j ACCEPT
 iptables -A FORWARD -i br-guest -s 192.168.33.1 -p tcp --sport 53 -j ACCEPT
 
+# Guest ↔ VPN
 iptables -A FORWARD -i br-guest -o awg0 -j ACCEPT
 iptables -A FORWARD -i awg0 -o br-guest -j ACCEPT
 
-iptables -t nat -A PREROUTING -s 192.168.33.0/24 -p udp --dport 53 -j DNAT --to-destination "$DNS:53"
-iptables -t nat -A PREROUTING -s 192.168.33.0/24 -p tcp --dport 53 -j DNAT --to-destination "$DNS:53"
+# NAT for DNS (force to VPN DNS)
+iptables -t nat -A PREROUTING -i br-guest -p udp --dport 53 -j DNAT --to-destination "$DNS"
+iptables -t nat -A PREROUTING -i br-guest -p tcp --dport 53 -j DNAT --to-destination "$DNS"
+iptables -A FORWARD -i br-guest -p udp --dport 53 ! -d "$DNS" -j REJECT
+iptables -A FORWARD -i br-guest -p tcp --dport 53 ! -d "$DNS" -j REJECT
+
+# Block DNS-over-TLS (DoT)
+iptables -A FORWARD -i br-guest -p tcp --dport 853 -j REJECT
+
+# (Optional) Block common DNS-over-HTTPS IPs (Google/Cloudflare/Quad9)
+iptables -A FORWARD -i br-guest -d 1.1.1.1 -j REJECT
+iptables -A FORWARD -i br-guest -d 8.8.8.8 -j REJECT
+iptables -A FORWARD -i br-guest -d 9.9.9.9 -j REJECT
+
+# NAT for general guest → VPN traffic
 iptables -t nat -A POSTROUTING -s 192.168.33.0/24 -o awg0 -j MASQUERADE
+
+# MSS Clamping for MTU issues
+iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -o awg0 -j TCPMSS --clamp-mss-to-pmtu
+
+# Optional: logging guest traffic
+iptables -I FORWARD 1 -i br-guest -j LOG --log-prefix "GUEST-VPN-DEBUG: " --log-level 7
 
 # UCI firewall zone
 echo "Configuring UCI firewall..."
@@ -84,6 +109,8 @@ uci set firewall.awg.network='awg0'
 uci set firewall.awg.input='ACCEPT'
 uci set firewall.awg.output='ACCEPT'
 uci set firewall.awg.forward='ACCEPT'
+uci set firewall.awg.masq='1'
+uci set firewall.awg.mtu_fix='1'
 
 # Forwarding rules if missing
 if ! uci show firewall | grep -qE "src='awg'|dest='awg'"; then
@@ -110,4 +137,6 @@ crontab -l 2>/dev/null | grep -qF "awg_watchdog.sh" || {
   (crontab -l 2>/dev/null; echo "$CRON_CMD") | crontab -
 }
 
-echo "Setup complete."
+echo "✅ Setup complete."
+echo "📡 Android devices should now work with full DNS + HTTPS compatibility."
+echo "💡 Tip: check traffic with 'logread -f | grep GUEST-VPN-DEBUG'"
