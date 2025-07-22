@@ -152,4 +152,4 @@ else
     echo "Cron job for watchdog script already exists."
 fi
 
-echo "Setup complete!"
+echo "Setup complete!!"
