@@ -1,8 +1,11 @@
 #!/bin/sh
 
-# Change to the script's own directory to ensure all relative paths work correctly.
+# Change to the script's own directory
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 cd "$SCRIPT_DIR" || exit 1
+
+# <<< Define the log file path >>>
+LOG_FILE="/tmp/guest_vpn_traffic.log"
 
 # Define configuration file paths
 config_file="amnezia_for_awg.conf"
@@ -75,7 +78,7 @@ ip rule add from 192.168.33.0/24 table 200 pref 200
 echo "Configuring firewall using the native UCI system..."
 
 # Block IPv6 on the guest interface to prevent leaks
-ip6tables -F FORWARD
+ip6tables -F FORWARD >/dev/null 2>&1
 ip6tables -A FORWARD -i br-guest -j DROP
 ip6tables -A FORWARD -o br-guest -j DROP
 
@@ -90,12 +93,12 @@ uci set firewall.awg.masq='1'      # Let the firewall handle NAT/Masquerading
 uci set firewall.awg.mtu_fix='1'   # Let the firewall handle MTU/MSS clamping
 
 # Create a forwarding rule to allow traffic FROM the 'guest' zone TO the new 'awg' zone
+uci -q delete firewall.guest_to_awg
 uci set firewall.guest_to_awg=forwarding
 uci set firewall.guest_to_awg.src='guest'
 uci set firewall.guest_to_awg.dest='awg'
 
 # Create a DNS redirection rule for the guest zone using the native firewall
-# This redirects any DNS request from guests to the DNS server specified in your config
 uci -q delete firewall.redirect_guest_dns
 uci set firewall.redirect_guest_dns=redirect
 uci set firewall.redirect_guest_dns.name='Redirect-Guest-DNS-to-VPN'
@@ -112,14 +115,27 @@ echo "Restarting firewall to apply changes..."
 /etc/init.d/firewall reload
 echo 1 > /proc/sys/net/ipv4/ip_forward
 
+# <<< ADDING LOGGING RULE POST-RELOAD >>>
+# We insert a logging rule at the top of the FORWARD chain after the firewall has been reloaded.
+iptables -I FORWARD 1 -i br-guest -j LOG --log-prefix "GUEST-VPN-DEBUG: " --log-level 7
+
 # --- CRON JOB ---
 CRON_COMMAND="* * * * * sh /data/usr/app/awg/awg_watchdog.sh > /dev/null 2>&1"
 if ! crontab -l 2>/dev/null | grep -qF "awg_watchdog.sh"; then
     echo "Adding cron job for watchdog script..."
     (crontab -l 2>/dev/null; echo "$CRON_COMMAND") | crontab -
-    echo "Cron job added successfully."
-else
-    echo "Cron job for watchdog script already exists."
 fi
 
-echo "✅ Setup complete. The guest network should now be fully routed through the VPN."
+# --- LOGGING SETUP ---
+echo "Setting up traffic logging to $LOG_FILE..."
+pkill -f "dmesg -c.*GUEST-VPN-DEBUG"
+echo "--- Log started at $(date) ---" > "$LOG_FILE"
+dmesg -c > /dev/null
+(while true; do
+    dmesg -c | grep "GUEST-VPN-DEBUG"
+    sleep 1
+done) >> "$LOG_FILE" &
+
+echo "Logging process has been started using a polling loop."
+echo "✅ Watch the log in a separate terminal with: tail -f $LOG_FILE"
+echo "Setup complete"
