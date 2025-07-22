@@ -111,6 +111,9 @@ iptables -t nat -A PREROUTING -p tcp -s 192.168.33.0/24 --dport 53 -j DNAT --to-
 # Set up NAT for all other guest network traffic
 iptables -t nat -A POSTROUTING -s 192.168.33.0/24 -o awg0 -j MASQUERADE
 
+# Explicitly REJECT IPv6 traffic from the guest network to force fallback to IPv4
+ip6tables -A FORWARD -i br-guest -j REJECT
+
 # --- UCI & SERVICE SETUP ---
 uci set firewall.awg=zone
 uci set firewall.awg.name='awg'
