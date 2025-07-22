@@ -87,44 +87,48 @@ ip route add default dev awg0 table 200
 ip rule add from 192.168.33.0/24 to 192.168.33.1 dport 53 table main pref 100
 ip rule add from 192.168.33.0/24 table 200 pref 200
 
-# --- FIREWALL RULES ---
+# --- FIREWALL RULES (REVISED STRATEGY) ---
 
 # --- FIREWALL RULE FLUSHING ---
-# Flush existing rules to prevent duplicates and ensure a clean state on re-run.
 echo "Flushing old iptables & ip6tables rules..."
-# Flush IPv4 tables
 iptables -F FORWARD
 iptables -t nat -F PREROUTING
 iptables -t nat -F POSTROUTING
 iptables -t mangle -F FORWARD
-# Flush IPv6 tables to prepare for blocking rules
+iptables -t mangle -F POSTROUTING
 ip6tables -F FORWARD 2>/dev/null
 
-# --- !! NEW: IPV6 BLOCKING (FIX FOR MOBILE CONNECTIVITY) !! ---
-# Mobile devices often prefer IPv6, which can cause connection hangs if the VPN
-# tunnel does not support it. This rule rejects IPv6 traffic from the guest
-# network to force devices to fall back to IPv4 immediately.
-echo "Blocking IPv6 on guest network to prevent VPN hangs..."
-ip6tables -A FORWARD -i br-guest -j REJECT
+# --- !! NEW: EXPLICIT FIREWALL POLICY & LOGGING !! ---
+# We are now using a "default-deny" policy. All traffic is blocked unless
+# explicitly allowed by a rule. This is more secure and reliable.
+echo "Setting up restrictive firewall policy..."
+iptables -P FORWARD DROP
 
-# --- !! NEW: TCP MSS CLAMPING (FIX FOR MOBILE CONNECTIVITY) !! ---
-# This is a critical fix for issues where some sites/apps load but others don't.
-# It prevents packet fragmentation over the VPN tunnel by lowering the
-# Maximum Segment Size (MSS) of TCP packets to fit within the VPN's MTU.
-echo "Applying TCP MSS clamping for VPN interface..."
-iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -o awg0 -j TCPMSS --set-mss 1240
+# Create a custom chain for logging dropped packets for easier debugging
+iptables -N LOG_DROP 2>/dev/null
+iptables -F LOG_DROP
+iptables -A LOG_DROP -j LOG --log-prefix "Dropped by VPN script: " --log-level 7
+iptables -A LOG_DROP -j DROP
 
-# --- FIREWALL RULES (CONTINUED) ---
-# Set up firewall for local DNS requests on the router itself
-iptables -A FORWARD -i br-guest -d 192.168.33.1 -p tcp --dport 53 -j ACCEPT
-iptables -A FORWARD -i br-guest -d 192.168.33.1 -p udp --dport 53 -j ACCEPT
-iptables -A FORWARD -i br-guest -s 192.168.33.1 -p tcp --sport 53 -j ACCEPT
-iptables -A FORWARD -i br-guest -s 192.168.33.1 -p udp --sport 53 -j ACCEPT
+# Allow returning traffic for established connections
+iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 
-# Allow traffic between guest network and the VPN tunnel
+# Allow new connections from the guest network to go out the VPN tunnel
 iptables -A FORWARD -i br-guest -o awg0 -j ACCEPT
-iptables -A FORWARD -i awg0 -o br-guest -j ACCEPT
 
+# --- !! NEW: ROBUST TCP MSS CLAMPING !! ---
+# This rule is more robust for preventing packet fragmentation issues.
+# It clamps the MSS to the path MTU, which is a more dynamic approach.
+echo "Applying robust TCP MSS clamping for VPN interface..."
+iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -o awg0 -j TCPMSS --clamp-to-pmtu
+
+# --- !! NEW: EXPLICIT IPV6 BLOCKING !! ---
+# Forcefully reject IPv6 traffic from the guest network to prevent connection hangs.
+echo "Blocking IPv6 on guest network to prevent VPN hangs..."
+ip6tables -P FORWARD DROP 2>/dev/null
+ip6tables -A FORWARD -i br-guest -j REJECT --reject-with adm-prohibited 2>/dev/null
+
+# --- NAT & DNS RULES (UNCHANGED LOGIC) ---
 # Set up NAT for DNS requests from guest network (redirect to VPN's DNS)
 iptables -t nat -A PREROUTING -p udp -s 192.168.33.0/24 --dport 53 -j DNAT --to-destination "${dns}:53"
 iptables -t nat -A PREROUTING -p tcp -s 192.168.33.0/24 --dport 53 -j DNAT --to-destination "${dns}:53"
@@ -135,6 +139,9 @@ iptables -t nat -A PREROUTING -s 192.168.33.0/24 -d 8.8.8.8 -p tcp --dport 53 -j
 
 # Set up NAT for all other guest network traffic
 iptables -t nat -A POSTROUTING -s 192.168.33.0/24 -o awg0 -j MASQUERADE
+
+# Finally, log and drop any forwarded packet that wasn't explicitly allowed.
+iptables -A FORWARD -j LOG_DROP
 
 # --- UCI & SERVICE SETUP ---
 uci set firewall.awg=zone
@@ -168,4 +175,6 @@ else
     echo "Cron job for watchdog script already exists."
 fi
 
-echo "Setup complete"
+echo "Setup complete!"
+echo ""
+echo "DIAGNOSTIC INFO: If you still have issues, check the system log for dropped packets with the command: dmesg | grep 'Dropped by VPN script'"
