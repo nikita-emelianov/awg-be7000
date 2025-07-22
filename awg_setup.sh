@@ -77,9 +77,6 @@ echo "Applying AmneziaWG configuration and IP address."
 ip a add "$address" dev awg0
 ip l set up awg0
 
-# --- PATCH: Set lower MTU for compatibility with Android ---
-ip link set dev awg0 mtu 1280
-
 # --- ROUTING RULES ---
 ip route del 192.168.33.0/24 dev br-guest 2>/dev/null
 ip route add 192.168.33.0/24 dev br-guest table main
@@ -89,32 +86,14 @@ ip rule add from 192.168.33.0/24 table 200 pref 200
 
 # --- FIREWALL RULES ---
 
-# --- FIREWALL RULE FLUSHING ---
-# Flush existing rules to prevent duplicates and ensure a clean state on re-run.
-echo "Flushing old iptables & ip6tables rules..."
-# Flush IPv4 tables
+# --- !! NEW SECTION !! ---
+# Flush existing rules to prevent duplicates on re-run
+echo "Flushing old iptables rules..."
 iptables -F FORWARD
 iptables -t nat -F PREROUTING
 iptables -t nat -F POSTROUTING
-iptables -t mangle -F FORWARD
-# Flush IPv6 tables to prepare for blocking rules
-ip6tables -F FORWARD 2>/dev/null
+# --- !! END NEW SECTION !! ---
 
-# --- !! NEW: IPV6 BLOCKING (FIX FOR MOBILE CONNECTIVITY) !! ---
-# Mobile devices often prefer IPv6, which can cause connection hangs if the VPN
-# tunnel does not support it. This rule rejects IPv6 traffic from the guest
-# network to force devices to fall back to IPv4 immediately.
-echo "Blocking IPv6 on guest network to prevent VPN hangs..."
-ip6tables -A FORWARD -i br-guest -j REJECT
-
-# --- !! NEW: TCP MSS CLAMPING (FIX FOR MOBILE CONNECTIVITY) !! ---
-# This is a critical fix for issues where some sites/apps load but others don't.
-# It prevents packet fragmentation over the VPN tunnel by lowering the
-# Maximum Segment Size (MSS) of TCP packets to fit within the VPN's MTU.
-echo "Applying TCP MSS clamping for VPN interface..."
-iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -o awg0 -j TCPMSS --set-mss 1240
-
-# --- FIREWALL RULES (CONTINUED) ---
 # Set up firewall for local DNS requests on the router itself
 iptables -A FORWARD -i br-guest -d 192.168.33.1 -p tcp --dport 53 -j ACCEPT
 iptables -A FORWARD -i br-guest -d 192.168.33.1 -p udp --dport 53 -j ACCEPT
@@ -128,10 +107,6 @@ iptables -A FORWARD -i awg0 -o br-guest -j ACCEPT
 # Set up NAT for DNS requests from guest network (redirect to VPN's DNS)
 iptables -t nat -A PREROUTING -p udp -s 192.168.33.0/24 --dport 53 -j DNAT --to-destination "${dns}:53"
 iptables -t nat -A PREROUTING -p tcp -s 192.168.33.0/24 --dport 53 -j DNAT --to-destination "${dns}:53"
-
-# --- PATCH: Force redirect DNS requests to 8.8.8.8 to working VPN DNS ---
-iptables -t nat -A PREROUTING -s 192.168.33.0/24 -d 8.8.8.8 -p udp --dport 53 -j DNAT --to-destination "${dns}:53"
-iptables -t nat -A PREROUTING -s 192.168.33.0/24 -d 8.8.8.8 -p tcp --dport 53 -j DNAT --to-destination "${dns}:53"
 
 # Set up NAT for all other guest network traffic
 iptables -t nat -A POSTROUTING -s 192.168.33.0/24 -o awg0 -j MASQUERADE
@@ -168,4 +143,4 @@ else
     echo "Cron job for watchdog script already exists."
 fi
 
-echo "Setup complete"
+echo "Setup complete."
