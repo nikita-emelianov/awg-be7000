@@ -41,8 +41,20 @@ ip link del awg0 2>/dev/null
 # Start daemon
 echo "Starting amneziawg-go..."
 /data/usr/app/awg/amneziawg-go awg0 &
-sleep 2
-ip link show awg0 >/dev/null 2>&1 || { echo "awg0 not created. Aborting."; exit 1; }
+
+# Wait for the interface to be created (replaces 'sleep 2')
+echo "Waiting for awg0 interface..."
+count=0
+while ! ip link show awg0 > /dev/null 2>&1; do
+    sleep 1
+    count=$((count+1))
+    if [ "$count" -ge 15 ]; then
+        echo "Error: awg0 interface not created after 15 seconds. Aborting."
+        pkill -f amneziawg-go # Clean up the failed daemon
+        exit 1
+    fi
+done
+echo "awg0 interface is up."
 
 # Configure interface
 echo "Configuring awg0..."
