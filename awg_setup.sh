@@ -46,13 +46,13 @@ echo "Starting amneziawg-go..."
 echo "Waiting for awg0 interface..."
 count=0
 while ! ip link show awg0 > /dev/null 2>&1; do
-    sleep 1
-    count=$((count+1))
-    if [ "$count" -ge 15 ]; then
-        echo "Error: awg0 interface not created after 15 seconds. Aborting."
-        pkill -f amneziawg-go # Clean up the failed daemon
-        exit 1
-    fi
+  sleep 1
+  count=$((count+1))
+  if [ "$count" -ge 15 ]; then
+    echo "Error: awg0 interface not created after 15 seconds. Aborting."
+    pkill -f amneziawg-go # Clean up the failed daemon
+    exit 1
+  fi
 done
 echo "awg0 interface is up."
 
