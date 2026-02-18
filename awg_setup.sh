@@ -23,8 +23,8 @@ echo "DNS: $DNS"
 # Download binaries if missing
 if [ ! -f "awg" ] || [ ! -f "amneziawg-go" ]; then
   echo "Downloading binaries..."
-  curl -L -o awg.tar.gz https://github.com/nikita-emelianov/awg-be7000/raw/main/awg.tar.gz
-  tar -xzf awg.tar.gz && chmod +x awg amneziawg-go && rm awg.tar.gz
+  curl -L -o amneziawg-go.tar.gz https://github.com/nikita-emelianov/awg-be7000/raw/main/amneziawg-go.tar.gz
+  tar -xzf amneziawg-go.tar.gz && chmod +x awg amneziawg-go && rm amneziawg-go.tar.gz
 else
   echo "Binaries already present"
 fi
