@@ -22,6 +22,7 @@ LogLevel ERROR
 * Connect: `ssh root@192.168.31.1`
 
 3.  On the router, create `/data/usr/app/awg` and place `amnezia_for_awg.conf` inside. You can use `scp` from your local machine:
+Note that you need to remove empty I2-I5 from the amnezia_for_awg.conf to make it work
 
 ```bash
 scp -O /path/to/amnezia_for_awg.conf root@192.168.31.1:/data/usr/app/awg/
@@ -30,7 +31,7 @@ scp -O /path/to/amnezia_for_awg.conf root@192.168.31.1:/data/usr/app/awg/
 4.  On the router, execute the following commands:
 
 ```bash
-curl -L -o awg_setup.sh github.com/nikita-emelianov/awg-be7000/raw/refs/heads/main/awg_setup.sh
+curl -L -o awg_setup.sh https://raw.githubusercontent.com/nikita-emelianov/awg-be7000/refs/heads/main/awg_setup.sh
 chmod +x awg_setup.sh
 ./awg_setup.sh
 ```
@@ -40,4 +41,4 @@ while running `./awg_setup.sh` you'll see error `Failed with exit code 1 from /e
 
 -----
 
-if you ever want to uninstall awg or start over with a fresh awg configuration, you'd run `clear_firewall_settings.sh` script
+if you ever want to uninstall awg or start over with a fresh awg configuration, you'd run `awg_clear_firewall_settings.sh` script
