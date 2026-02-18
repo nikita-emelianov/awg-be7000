@@ -21,10 +21,10 @@ echo "DNS: $DNS"
 [ -f "$IFCONFIG" ] || { awk '!/^Address/ && !/^DNS/' "$CONFIG" > "$IFCONFIG"; echo "Created $IFCONFIG"; }
 
 # Download binaries if missing
-if [ ! -f "amneziawg-go" ]; then
+if [ ! -f "awg" ] || [ ! -f "amneziawg-go" ]; then
   echo "Downloading binaries..."
-  curl -L -o amneziawg-go https://github.com/nikita-emelianov/awg-be7000/raw/main/amneziawg-go
-  chmod +x amneziawg-go
+  curl -L -o awg.tar.gz https://github.com/nikita-emelianov/awg-be7000/raw/main/awg.tar.gz
+  tar -xzf awg.tar.gz && chmod +x awg amneziawg-go && rm awg.tar.gz
 else
   echo "Binaries already present"
 fi
@@ -42,7 +42,7 @@ ip link del awg0 2>/dev/null
 echo "Starting amneziawg-go..."
 /data/usr/app/awg/amneziawg-go awg0 &
 
-# Wait for the interface to be created
+# Wait for the interface to be created (replaces 'sleep 2')
 echo "Waiting for awg0 interface..."
 count=0
 while ! ip link show awg0 > /dev/null 2>&1; do
