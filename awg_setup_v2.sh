@@ -21,7 +21,7 @@ echo "DNS: $DNS"
 [ -f "$IFCONFIG" ] || { awk '!/^Address/ && !/^DNS/' "$CONFIG" > "$IFCONFIG"; echo "Created $IFCONFIG"; }
 
 # Download binaries if missing
-if [ ! -f "wg" ] || [ ! -f "amneziawg-go" ]; then
+if [ ! -f "awg" ] || [ ! -f "amneziawg-go" ]; then
   echo "Downloading binaries..."
   curl -L -o amneziawg-go https://raw.githubusercontent.com/nikita-emelianov/awg-be7000/refs/heads/main/amneziawg-go
   curl -L -o awg https://raw.githubusercontent.com/nikita-emelianov/awg-be7000/refs/heads/main/awg
