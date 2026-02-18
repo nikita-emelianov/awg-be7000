@@ -24,8 +24,8 @@ echo "DNS: $DNS"
 if [ ! -f "wg" ] || [ ! -f "amneziawg-go" ]; then
   echo "Downloading binaries..."
   curl -L -o amneziawg-go https://raw.githubusercontent.com/nikita-emelianov/awg-be7000/refs/heads/main/amneziawg-go
-  curl -L -o wg https://raw.githubusercontent.com/nikita-emelianov/awg-be7000/refs/heads/main/wg
-  chmod +x wg amneziawg-go
+  curl -L -o awg https://raw.githubusercontent.com/nikita-emelianov/awg-be7000/refs/heads/main/awg
+  chmod +x awg amneziawg-go
 else
   echo "Binaries already present"
 fi
@@ -59,7 +59,7 @@ echo "awg0 interface is up."
 
 # Configure interface
 echo "Configuring awg0..."
-/data/usr/app/awg/wg setconf awg0 /data/usr/app/awg/awg0.conf
+/data/usr/app/awg/awg setconf awg0 /data/usr/app/awg/awg0.conf
 ip addr add "$ADDRESS" dev awg0
 ip link set up awg0
 
